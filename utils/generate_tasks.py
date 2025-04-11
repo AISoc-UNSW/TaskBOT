@@ -203,19 +203,20 @@ Extracted Tasks (JSON):
     print(f"Exception type: {type(e)}")
     return []
 
-# Example Usage (add this part outside the function if needed for testing)
-if __name__ == '__main__':
-  # Replace with actual script content and IDs
-  example_script = open('./sample_script.txt', 'r').read()
-  meeting_id = 1
-  portfolio_id = 101
-  generated_tasks = generate_tasks(example_script, meeting_id, portfolio_id)
-  print("Generated Tasks:")
-  import pprint
-  pprint.pprint(generated_tasks)
+# Example Usage which generates tasks and saves them to a file
 
-  with open('tasks_output_5.json', 'w') as f:
-      json.dump(generated_tasks, f, indent=2)
+# if __name__ == '__main__':
+#   # Replace with actual script content and IDs
+#   example_script = open('./sample_script.txt', 'r').read()
+#   meeting_id = 1
+#   portfolio_id = 101
+#   generated_tasks = generate_tasks(example_script, meeting_id, portfolio_id)
+#   print("Generated Tasks:")
+#   import pprint
+#   pprint.pprint(generated_tasks)
+
+#   with open('tasks_output_5.json', 'w') as f:
+#       json.dump(generated_tasks, f, indent=2)
 
 def process_meeting_transcript(script, meeting_id, portfolio_id=None):
     """
@@ -278,9 +279,11 @@ def process_meeting_transcript(script, meeting_id, portfolio_id=None):
         print(f"Error processing meeting transcript: {e}")
         return []
 
-# if __name__ == '__main__':
-#   # Replace with actual script content and IDs
-#   example_script = open('./sample_script.txt', 'r').read()
-#   meeting_id = 1
-#   portfolio_id = 101
-#   process_meeting_transcript(example_script, meeting_id, portfolio_id)
+# Example Usage which generates tasks and saves them to the database
+
+if __name__ == '__main__':
+  # Replace with actual script content and IDs
+  example_script = open('./sample_script.txt', 'r').read()
+  meeting_id = 1
+  portfolio_id = 101
+  process_meeting_transcript(example_script, meeting_id, portfolio_id)

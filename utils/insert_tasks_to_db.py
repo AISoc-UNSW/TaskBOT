@@ -53,8 +53,21 @@ def insert_tasks_to_supabase(tasks, supabase_client):
         for task in tasks:
             await insert_task_with_subtasks(task)
     
-    # Run async function
-    asyncio.run(process_all_tasks())
+    # Run async function with better compatibility
+    try:
+        # Get the current event loop if one exists
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If we're in an existing event loop, use create_task
+            future = asyncio.create_task(process_all_tasks())
+            # Wait for it to complete
+            loop.run_until_complete(future)
+        else:
+            # No running loop, safe to use run
+            loop.run_until_complete(process_all_tasks())
+    except RuntimeError:
+        # No event loop in current context, create a new one
+        asyncio.run(process_all_tasks())
     
     return top_level_task_ids
 

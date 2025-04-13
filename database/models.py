@@ -1,5 +1,6 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, TIMESTAMP
+from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
@@ -20,3 +21,16 @@ class Task(Base):
     created_at = Column(TIMESTAMP)
     updated_at = Column(TIMESTAMP)
     portfolio_id = Column(Integer)
+
+class MeetingRecord(Base):
+    __tablename__ = "meeting_records"
+    
+    meeting_id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_date = Column(Date, nullable=False)
+    meeting_name = Column(String(255), nullable=False)
+    recording_file_link = Column(Text, nullable=True)
+    auto_caption = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    portfolio_id = Column(Integer, ForeignKey('portfolios.portfolio_id', ondelete='CASCADE'), nullable=False)
+    
+    portfolio = relationship("Portfolio", back_populates="meeting_records")

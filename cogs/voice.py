@@ -30,23 +30,28 @@ class Voice(commands.Cog):
             SUPABASE_KEY = os.getenv("SUPABASE_KEY")
             supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-            curr_time = time.time()
-            file_name = f"{self.meeting_name}_{curr_time}.wav"
+            # 获取频道名称
+            channel_name = interaction.channel.name
+            # 格式化时间，更易读
+            formatted_time = time.strftime("%Y%m%d_%H%M%S")
+            # 新的文件命名格式
+            file_name = f"{channel_name}_{formatted_time}.wav"
+            meeting_id = f"meeting_{channel_name}_{formatted_time}"
 
             with open(file_path, "rb") as audio_file:
                 raw_audio_data = audio_file.read()
 
-            supabase.table("Meetings Records").insert({
-                "Meeting ID": f"meeting_{curr_time}",
+            supabase.table("meeting_records").insert({
+                "Meeting ID": meeting_id,
                 "Meeting Date": time.strftime("%Y-%m-%d"),
-                "Meeting Name": self.meeting_name,
+                "Meeting Name": f"{channel_name}_{self.meeting_name}",  # 组合频道名和会议名
                 "Raw Audio Data": raw_audio_data,
                 "Auto Caption": "",
                 "Summary": "",
                 "Portfolio ID": self.portfolio_id
             }).execute()
 
-            await interaction.followup.send(f"Recording uploaded directly to the 'Meetings' table as `{file_name}`.")
+            await interaction.followup.send(f"Recording uploaded as `{file_name}`")
         except Exception as e:
             await interaction.followup.send(f"Failed to upload recording: {e}")
 

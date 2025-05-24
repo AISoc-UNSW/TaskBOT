@@ -1,5 +1,5 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey
 
 Base = declarative_base()
 
@@ -20,3 +20,5 @@ class Task(Base):
     created_at = Column(TIMESTAMP)
     updated_at = Column(TIMESTAMP)
     portfolio_id = Column(Integer)
+    parent_task_id = Column(Integer, ForeignKey('tasks.task_id'))
+    source_meeting_id = Column(Integer)

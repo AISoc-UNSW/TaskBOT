@@ -85,7 +85,7 @@ class Voice(commands.Cog):
         except Exception as e:
             await channel.send(f"Failed to upload recording: {e}")
 
-    @discord.slash_command(name="record_voice", description="Start recording audio in the voice channel.")
+    @discord.slash_command(name="record_meet", description="Start recording audio in the voice channel.")
     async def record(self, interaction: discord.Interaction, meeting_name: str):
         voice = interaction.user.voice
         channel = interaction.user.voice.channel
@@ -107,17 +107,17 @@ class Voice(commands.Cog):
 
         await interaction.response.send_message("Recording started. Use `/stop_voice_record` to stop.")
 
-    @discord.slash_command(name="stop_record", description="Stop recording and save the file.")
+    @discord.slash_command(name="stop_record", description="Stop recording and save the meeting.")
     async def stop(self, interaction: discord.Interaction):
-        if interaction.guild.id in connections:  # Check if the guild is in the cache.
+        if interaction.guild.id in connections: 
             vc = connections[interaction.guild.id]
-            vc.stop_recording()  # Stop recording, and call the callback (once_done).
-            del connections[interaction.guild.id]  # Remove the guild from the cache.
+            vc.stop_recording()  
+            del connections[interaction.guild.id] 
             await interaction.response.send_message("Stopped recording and cleaned up.", ephemeral=True)
         else:
             await interaction.response.send_message("I am currently not recording here.", ephemeral=True)
 
-    @discord.slash_command(name="join_voice", description="Join a voice channel.")
+    @discord.slash_command(name="join_meeting", description="Join a voice channel to record meeting.")
     async def join(self, interaction: discord.Interaction):
         if interaction.user.voice:
             channel = interaction.user.voice.channel
@@ -126,7 +126,7 @@ class Voice(commands.Cog):
         else:
             await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
 
-    @discord.slash_command(name="leave_voice", description="Leave the voice channel.")
+    @discord.slash_command(name="leave_meeting", description="Leave the meeting.")
     async def leave(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if voice_client:

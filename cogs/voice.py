@@ -5,46 +5,58 @@ import os
 import time
 from supabase import create_client
 from pydub import AudioSegment
+import subprocess
 
 connections = {}
 
 # NOTE: using PyCord instead of discord.py for voice recording
 # https://guide.pycord.dev/voice/receiving: recording functionality taken from here
+# COGS loading: https://guide.pycord.dev/popular-topics/cogs#cog-rules
+ 
 class Voice(commands.Cog):
+    # aka, for cogs, can do something like:
+    # voice = discord.SlashCommandGroup("voice", "Meeting based voice commands")
+    # or, leave it as discord.command
     def __init__(self, bot):
         self.bot = bot
         self.meeting_name = ""
         self.portfolio_id = ""
 
     async def finished_callback(self, sink: discord.sinks.WaveSink, channel: discord.TextChannel, *args):
-        # Save all user audio files and upload to Supabase
-        audio_segments = []
-        temp_files = []
+        segments = []
+        mention_strs = []
+
         for user_id, audio in sink.audio_data.items():
-            file_path = f"{self.meeting_name}_{user_id}_{int(time.time())}.wav"
-            with open(file_path, "wb") as f:
-                f.write(audio.file.read())
-                audio.file.seek(0)
-            temp_files.append(file_path)
-            # Load audio with pydub so that the audio can be mixed/appended together
-            audio_segment = AudioSegment.from_wav(file_path)
-            audio_segments.append(audio_segment)
+            raw_path = f"{user_id}_raw.wav"
+            fixed_path = f"{user_id}_fixed.wav"
 
-        # Mix all audio tracks together for one whole meeting
-        if audio_segments:
-            mixed = audio_segments[0]
-            for seg in audio_segments[1:]:
-                mixed = mixed.overlay(seg)
-            mixed_file_path = f"{self.meeting_name}_MIXED_{int(time.time())}.wav"
-            mixed.export(mixed_file_path, format="wav")
-            await self.upload_to_supabase(channel, mixed_file_path)
-            os.remove(mixed_file_path)
+            with open(raw_path, "wb") as f:
+                f.write(audio.file.getbuffer())
 
-        # Clean up temp files
-        for file_path in temp_files:
-            os.remove(file_path)
+            # Fix with ffmpeg for compatibility (as pydub did not work well with raw wav audio)
+            subprocess.run(["ffmpeg", "-y", "-i", raw_path, fixed_path], check=True)
+            seg = AudioSegment.from_wav(fixed_path)
 
-        await channel.send(f"Finished recording audio for: {self.meeting_name}.")
+            segments.append(seg)
+            mention_strs.append(f"<@{user_id}>")
+            
+            os.remove(raw_path)
+            os.remove(fixed_path)
+
+        if not segments:
+            await channel.send("No audio recorded.")
+            return
+
+        # Overlay all user segments -> this will automatically handle silence 
+        combined = segments[0]
+        for seg in segments[1:]:
+            combined = combined.overlay(seg)
+
+        combined_file_name = f"meeting_{self.meeting_name}_{self.portfolio_id}.wav"
+        combined.export(combined_file_name, format="wav")
+        await self.upload_to_supabase(channel, combined_file_name)
+        await channel.send(f"Finished recording for the meeting: {self.meeting_name}")
+        os.remove(combined_file_name)
 
     async def upload_to_supabase(self, channel, file_path):
         try:
@@ -72,7 +84,7 @@ class Voice(commands.Cog):
         except Exception as e:
             await channel.send(f"Failed to upload recording: {e}")
 
-    @app_commands.command(name="record_voice", description="Start recording audio in the voice channel.")
+    @discord.slash_command(name="record_voice", description="Start recording audio in the voice channel.")
     async def record(self, interaction: discord.Interaction, meeting_name: str, portfolio_id: str):
         voice = interaction.user.voice
         self.meeting_name = meeting_name
@@ -93,17 +105,17 @@ class Voice(commands.Cog):
 
         await interaction.response.send_message("Recording started. Use `/stop_voice_record` to stop.")
 
-    @app_commands.command(name="stop_voice_record", description="Stop recording and save the file.")
+    @discord.slash_command(name="stop_voice_record", description="Stop recording and save the file.")
     async def stop_record(self, interaction: discord.Interaction):
-        if interaction.guild.id in connections:
+        if interaction.guild.id in connections:  # Check if the guild is in the cache.
             vc = connections[interaction.guild.id]
-            vc.stop_recording()  
-            del connections[interaction.guild.id]
-            await interaction.response.send_message("Stopped recording and processing audio.")
+            vc.stop_recording()  # Stop recording, and call the callback (once_done).
+            del connections[interaction.guild.id]  # Remove the guild from the cache.
+            await interaction.response.send_message("Stopped recording and cleaned up.", ephemeral=True)
         else:
-            await interaction.response.send_message("Not recording in this server.", ephemeral=True)
+            await interaction.response.send_message("I am currently not recording here.", ephemeral=True)
 
-    @app_commands.command(name="join_voice", description="Join a voice channel.")
+    @discord.slash_command(name="join_voice", description="Join a voice channel.")
     async def join_voice(self, interaction: discord.Interaction):
         if interaction.user.voice:
             channel = interaction.user.voice.channel
@@ -112,7 +124,7 @@ class Voice(commands.Cog):
         else:
             await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
 
-    @app_commands.command(name="leave_voice", description="Leave the voice channel.")
+    @discord.slash_command(name="leave_voice", description="Leave the voice channel.")
     async def leave_voice(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if voice_client:

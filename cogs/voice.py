@@ -54,6 +54,7 @@ class Voice(commands.Cog):
 
         combined_file_name = f"meeting_{self.meeting_name}_{self.portfolio_id}.wav"
         combined.export(combined_file_name, format="wav")
+        # Upload to Supabase + send finished message
         await self.upload_to_supabase(channel, combined_file_name)
         await channel.send(f"Finished recording for the meeting: {self.meeting_name}")
         os.remove(combined_file_name)
@@ -85,10 +86,11 @@ class Voice(commands.Cog):
             await channel.send(f"Failed to upload recording: {e}")
 
     @discord.slash_command(name="record_voice", description="Start recording audio in the voice channel.")
-    async def record(self, interaction: discord.Interaction, meeting_name: str, portfolio_id: str):
+    async def record(self, interaction: discord.Interaction, meeting_name: str):
         voice = interaction.user.voice
+        channel = interaction.user.voice.channel
         self.meeting_name = meeting_name
-        self.portfolio_id = portfolio_id
+        self.portfolio_id = channel.category # Gets the portfolio ID/category based on the channel that the voice meeting is under
 
         if not voice:
             return await interaction.response.send_message("You're not in a VC!", ephemeral=True)
@@ -105,8 +107,8 @@ class Voice(commands.Cog):
 
         await interaction.response.send_message("Recording started. Use `/stop_voice_record` to stop.")
 
-    @discord.slash_command(name="stop_voice_record", description="Stop recording and save the file.")
-    async def stop_record(self, interaction: discord.Interaction):
+    @discord.slash_command(name="stop_record", description="Stop recording and save the file.")
+    async def stop(self, interaction: discord.Interaction):
         if interaction.guild.id in connections:  # Check if the guild is in the cache.
             vc = connections[interaction.guild.id]
             vc.stop_recording()  # Stop recording, and call the callback (once_done).
@@ -116,7 +118,7 @@ class Voice(commands.Cog):
             await interaction.response.send_message("I am currently not recording here.", ephemeral=True)
 
     @discord.slash_command(name="join_voice", description="Join a voice channel.")
-    async def join_voice(self, interaction: discord.Interaction):
+    async def join(self, interaction: discord.Interaction):
         if interaction.user.voice:
             channel = interaction.user.voice.channel
             await channel.connect()
@@ -125,7 +127,7 @@ class Voice(commands.Cog):
             await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
 
     @discord.slash_command(name="leave_voice", description="Leave the voice channel.")
-    async def leave_voice(self, interaction: discord.Interaction):
+    async def leave(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if voice_client:
             await voice_client.disconnect()

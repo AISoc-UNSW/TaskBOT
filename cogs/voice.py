@@ -3,35 +3,70 @@ from discord.ext import commands
 from discord import app_commands
 import os
 import time
-import tempfile
-import asyncio
 from supabase import create_client
+from pydub import AudioSegment
 import subprocess
 
 connections = {}
-ffmpeg_processes = {} 
 
+# NOTE: using PyCord instead of discord.py for voice recording
+# https://guide.pycord.dev/voice/receiving: recording functionality taken from here
+# COGS loading: https://guide.pycord.dev/popular-topics/cogs#cog-rules
+ 
 class Voice(commands.Cog):
+    # aka, for cogs, can do something like:
+    # voice = discord.SlashCommandGroup("voice", "Meeting based voice commands")
+    # or, leave it as discord.command
     def __init__(self, bot):
         self.bot = bot
         self.meeting_name = ""
         self.portfolio_id = ""
 
-    async def finished_callback(self, interaction: discord.Interaction, file_path: str):
-        await self.upload_to_supabase(interaction, file_path)
+    async def finished_callback(self, sink: discord.sinks.WaveSink, channel: discord.TextChannel, *args):
+        segments = []
+        mention_strs = []
 
-        os.remove(file_path)
+        for user_id, audio in sink.audio_data.items():
+            raw_path = f"{user_id}_raw.wav"
+            fixed_path = f"{user_id}_fixed.wav"
 
-        await interaction.channel.send("Finished recording and uploaded the file.")
+            with open(raw_path, "wb") as f:
+                f.write(audio.file.getbuffer())
 
-    async def upload_to_supabase(self, interaction, file_path):
+            # Fix with ffmpeg for compatibility (as pydub did not work well with raw wav audio)
+            subprocess.run(["ffmpeg", "-y", "-i", raw_path, fixed_path], check=True)
+            seg = AudioSegment.from_wav(fixed_path)
+
+            segments.append(seg)
+            mention_strs.append(f"<@{user_id}>")
+            
+            os.remove(raw_path)
+            os.remove(fixed_path)
+
+        if not segments:
+            await channel.send("No audio recorded.")
+            return
+
+        # Overlay all user segments -> this will automatically handle silence 
+        combined = segments[0]
+        for seg in segments[1:]:
+            combined = combined.overlay(seg)
+
+        combined_file_name = f"meeting_{self.meeting_name}_{self.portfolio_id}.wav"
+        combined.export(combined_file_name, format="wav")
+        # Upload to Supabase + send finished message
+        await self.upload_to_supabase(channel, combined_file_name)
+        await channel.send(f"Finished recording for the meeting: {self.meeting_name}")
+        os.remove(combined_file_name)
+
+    async def upload_to_supabase(self, channel, file_path):
         try:
             SUPABASE_URL = os.getenv("SUPABASE_URL")
             SUPABASE_KEY = os.getenv("SUPABASE_KEY")
             supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
             curr_time = time.time()
-            file_name = f"{self.meeting_name}_{curr_time}.wav"
+            file_name = os.path.basename(file_path)
 
             with open(file_path, "rb") as audio_file:
                 raw_audio_data = audio_file.read()
@@ -46,65 +81,44 @@ class Voice(commands.Cog):
                 "Portfolio ID": self.portfolio_id
             }).execute()
 
-            await interaction.followup.send(f"Recording uploaded directly to the 'Meetings' table as `{file_name}`.")
+            await channel.send(f"Recording uploaded directly to the 'Meetings' table as `{file_name}`.")
         except Exception as e:
-            await interaction.followup.send(f"Failed to upload recording: {e}")
+            await channel.send(f"Failed to upload recording: {e}")
 
-    @app_commands.command(name="record_voice", description="Start recording audio in the voice channel.")
-    async def record(self, interaction: discord.Interaction, meeting_name: str, portfolio_id: str):
-        """Start recording voice in a VC using ffmpeg."""
+    @discord.slash_command(name="record_meet", description="Start recording audio in the voice channel.")
+    async def record(self, interaction: discord.Interaction, meeting_name: str):
         voice = interaction.user.voice
+        channel = interaction.user.voice.channel
         self.meeting_name = meeting_name
-        self.portfolio_id = portfolio_id
+        self.portfolio_id = channel.category # Gets the portfolio ID/category based on the channel that the voice meeting is under
 
         if not voice:
             return await interaction.response.send_message("You're not in a VC!", ephemeral=True)
 
-        vc = interaction.guild.voice_client
+        vc = await voice.channel.connect()
         connections[interaction.guild.id] = vc
-        
-        temp_wav_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-        ffmpeg_process = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-f", "s16le",  
-            "-ar", "48000",  
-            "-ac", "2",      
-            "-i", "-",       
-            temp_wav_file,   
-            stdin=subprocess.PIPE,
-            stderr=subprocess.DEVNULL
+
+        # Recording audio using WaveSink
+        vc.start_recording(
+            discord.sinks.WaveSink(),
+            self.finished_callback, # callback -> saved audio when stop_recording is invoked
+            interaction.channel
         )
-        ffmpeg_processes[interaction.guild.id] = (ffmpeg_process, temp_wav_file)
 
-        # Respond to the interaction
-        if not interaction.response.is_done():
-            await interaction.response.send_message("Recording started. Use `/stop_voice_record` to stop.")
+        await interaction.response.send_message("Recording started. Use `/stop_voice_record` to stop.")
+
+    @discord.slash_command(name="stop_record", description="Stop recording and save the meeting.")
+    async def stop(self, interaction: discord.Interaction):
+        if interaction.guild.id in connections: 
+            vc = connections[interaction.guild.id]
+            vc.stop_recording()  
+            del connections[interaction.guild.id] 
+            await interaction.response.send_message("Stopped recording and cleaned up.", ephemeral=True)
         else:
-            await interaction.followup.send("Recording started. Use `/stop_voice_record` to stop.")
+            await interaction.response.send_message("I am currently not recording here.", ephemeral=True)
 
-    @app_commands.command(name="stop_voice_record", description="Stop recording and save the file.")
-    async def stop_record(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
-        if interaction.guild.id in ffmpeg_processes:
-            ffmpeg_process, temp_wav_file = ffmpeg_processes[interaction.guild.id]
-            ffmpeg_process.stdin.close()
-            await ffmpeg_process.wait()
-
-            if interaction.guild.id in connections:
-                vc = connections[interaction.guild.id]
-                await vc.disconnect()
-                del connections[interaction.guild.id] 
-
-            del ffmpeg_processes[interaction.guild.id]
-
-            await self.finished_callback(interaction, temp_wav_file)
-        else:
-            await interaction.followup.send("Not recording in this server.", ephemeral=True)
-
-    @app_commands.command(name="join_voice", description="Join a voice channel.")
-    async def join_voice(self, interaction: discord.Interaction):
-        """Joins the voice channel the user is in."""
+    @discord.slash_command(name="join_meeting", description="Join a voice channel to record meeting.")
+    async def join(self, interaction: discord.Interaction):
         if interaction.user.voice:
             channel = interaction.user.voice.channel
             await channel.connect()
@@ -112,9 +126,8 @@ class Voice(commands.Cog):
         else:
             await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
 
-    @app_commands.command(name="leave_voice", description="Leave the voice channel.")
-    async def leave_voice(self, interaction: discord.Interaction):
-        """Leaves the voice channel if connected."""
+    @discord.slash_command(name="leave_meeting", description="Leave the meeting.")
+    async def leave(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if voice_client:
             await voice_client.disconnect()
